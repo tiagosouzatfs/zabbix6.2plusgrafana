@@ -1,0 +1,111 @@
+version: '3.9'
+
+services:
+
+  mysql-server:
+    image: mysql:8.0
+    networks:
+      zbx_net:
+        ipv4_address: 10.0.0.2
+    ports:
+      - 3306:3306
+    restart: always
+    command:
+      - mysqld
+      - --character-set-server=utf8
+      - --collation-server=utf8_bin
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      - MYSQL_USER=zabbix
+      - MYSQL_DATABASE=zabbix
+      - MYSQL_PASSWORD=zabbix_pwd
+      - MYSQL_ROOT_PASSWORD=root_pwd
+    volumes:
+      - ./zabbix/mysql:/var/lib/mysql:rw
+
+  zabbix-server-mysql:
+    image: zabbix/zabbix-server-mysql:ubuntu-6.2-latest
+    networks:
+      zbx_net:
+        ipv4_address: 10.0.0.3
+    restart: always
+    links:
+      - mysql-server
+    ports:
+      - 10051:10051
+      - 10050:10050
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./zabbix-data/alertscripts:/usr/lib/zabbix/alertscripts:ro
+      - ./zabbix-data/externalscripts:/usr/lib/zabbix/externalscripts:ro
+      - ./zabbix-data/export:/var/lib/zabbix/export:rw
+      - ./zabbix-data/modules:/var/lib/zabbix/modules:ro
+      - ./zabbix-data/enc:/var/lib/zabbix/enc:ro
+      - ./zabbix-data/certs:/var/lib/zabbix/ssl/certs:ro
+      - ./zabbix-data/ssl_keys:/var/lib/zabbix/ssl_keys:ro
+      - ./zabbix-data/ssl_ca:/var/lib/zabbix/ssl/ssl_ca:ro 
+      - ./zabbix-data/snmptraps:/var/lib/zabbix/snmptraps:rw
+      - ./zabbix-data/mibs:/var/lib/zabbix/mibs:ro
+    environment:
+      - DB_SERVER_HOST=mysql-server
+      - MYSQL_DATABASE=zabbix
+      - MYSQL_USER=zabbix
+      - MYSQL_PASSWORD=zabbix_pwd
+      - MYSQL_ROOT_PASSWORD=root_pwd
+    depends_on:
+      - mysql-server
+
+  zabbix-web-nginx-mysql:
+    image: zabbix/zabbix-web-nginx-mysql:ubuntu-6.2-latest
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./zabbix-nginx/nginx:/etc/ssl/nginx:ro
+      - ./zabbix-nginx/modules/:/usr/share/zabbix/modules/:ro
+    environment:
+      - ZBX_SERVER_HOST=zabbix-server-mysql
+      - DB_SERVER_HOST=mysql-server
+      - MYSQL_DATABASE=zabbix
+      - MYSQL_USER=zabbix
+      - MYSQL_PASSWORD=zabbix_pwd
+      - MYSQL_ROOT_PASSWORD=root_pwd
+      - PHP_TZ=America/Sao_Paulo
+    links:
+      - mysql-server
+    networks:
+      zbx_net:
+        ipv4_address: 10.0.0.4
+    ports:
+      - 80:8080
+      - 443:8443
+    restart: always
+    depends_on:
+      - mysql-server
+      - zabbix-server-mysql
+
+  grafana-server:
+    image: grafana/grafana:latest
+    environment:
+      - GF_INSTALL_PLUGINS=alexanderzobnin-zabbix-app
+    user: root
+    volumes:
+      - ./grafana/grafana:/var/lib/grafana
+      - ./grafana/plugins:/var/lib/grafana/plugins
+    ports:
+      - 3000:3000
+    networks:
+      zbx_net:
+        ipv4_address: 10.0.0.5
+    depends_on:
+      - mysql-server
+      - zabbix-server-mysql
+    restart: always
+
+networks:
+  zbx_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
+          gateway: 10.0.0.1
